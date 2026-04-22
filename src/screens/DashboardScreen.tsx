@@ -2,6 +2,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
+import { useAuth } from '../features/auth/AuthContext';
 import { shareHistoryPdf, shareInventoryCsv } from '../features/inventory/export';
 import { useDashboardSummary, useInventorySnapshot } from '../features/inventory/hooks';
 import { RootStackParamList } from '../navigation/AppNavigator';
@@ -11,22 +12,31 @@ type Navigation = NativeStackNavigationProp<RootStackParamList>;
 
 export function DashboardScreen() {
   const navigation = useNavigation<Navigation>();
+  const { isDemo, isConfigured, profile, signOut } = useAuth();
   const { data: summary } = useDashboardSummary();
   const { data: snapshot } = useInventorySnapshot();
+  const canManageCatalog = profile?.role === 'owner' || profile?.role === 'manager' || !isConfigured;
 
   return (
     <ScrollView contentContainerStyle={styles.content} style={styles.container}>
       <View style={styles.hero}>
-        <Text style={styles.eyebrow}>HookStock</Text>
+        <View style={styles.heroTopRow}>
+          <Text style={styles.eyebrow}>HookStock</Text>
+          <View style={[styles.modeBadge, isDemo ? styles.modeBadgeDemo : styles.modeBadgeCloud]}>
+            <Text style={styles.modeBadgeText}>{isDemo ? 'Modo demo' : `Cloud | ${profile?.role ?? 'staff'}`}</Text>
+          </View>
+        </View>
         <Text style={styles.title}>Painel rapido do estoque em tempo real</Text>
         <Text style={styles.subtitle}>
           Acompanhe ruptura, volume total e parta para a acao sem sair do celular.
         </Text>
 
         <View style={styles.heroActions}>
-          <Pressable onPress={() => navigation.navigate('NewModel')} style={styles.primaryButton}>
-            <Text style={styles.primaryButtonText}>Cadastrar modelo</Text>
-          </Pressable>
+          {canManageCatalog ? (
+            <Pressable onPress={() => navigation.navigate('NewModel')} style={styles.primaryButton}>
+              <Text style={styles.primaryButtonText}>Cadastrar modelo</Text>
+            </Pressable>
+          ) : null}
 
           <Pressable
             disabled={!snapshot}
@@ -35,6 +45,12 @@ export function DashboardScreen() {
           >
             <Text style={styles.secondaryButtonText}>Exportar CSV</Text>
           </Pressable>
+
+          {!isDemo ? (
+            <Pressable onPress={() => void signOut()} style={styles.logoutButton}>
+              <Text style={styles.secondaryButtonText}>Sair</Text>
+            </Pressable>
+          ) : null}
         </View>
       </View>
 
@@ -57,7 +73,7 @@ export function DashboardScreen() {
               <View style={{ flex: 1, gap: 4 }}>
                 <Text style={styles.alertLabel}>{item.label}</Text>
                 <Text style={styles.alertMeta}>
-                  {item.position} · {item.variation}
+                  {item.position} | {item.variation}
                 </Text>
               </View>
               <Text style={styles.alertQty}>{item.quantity}</Text>
@@ -118,7 +134,17 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: theme.colors.border,
   },
+  heroTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   eyebrow: { color: theme.colors.secondary, fontSize: 13, fontWeight: '700', letterSpacing: 1 },
+  modeBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderCurve: 'continuous',
+  },
+  modeBadgeDemo: { backgroundColor: '#254067' },
+  modeBadgeCloud: { backgroundColor: '#214738' },
+  modeBadgeText: { color: theme.colors.text, fontSize: 12, fontWeight: '800' },
   title: { color: theme.colors.text, fontSize: 28, fontWeight: '800', lineHeight: 34 },
   subtitle: { color: theme.colors.textMuted, fontSize: 15, lineHeight: 22 },
   heroActions: { flexDirection: 'row', gap: 10, flexWrap: 'wrap' },
@@ -138,6 +164,13 @@ const styles = StyleSheet.create({
     borderCurve: 'continuous',
   },
   secondaryButtonText: { color: theme.colors.text, fontWeight: '700' },
+  logoutButton: {
+    backgroundColor: '#22304a',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 16,
+    borderCurve: 'continuous',
+  },
   statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
   statCard: {
     width: '47%',

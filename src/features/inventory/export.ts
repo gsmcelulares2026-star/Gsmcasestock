@@ -9,6 +9,14 @@ function formatDate(date: Date) {
   return date.toISOString().slice(0, 10);
 }
 
+function escapeHtml(text: string) {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 export async function shareInventoryCsv(snapshot: InventorySnapshot) {
   const csv = await exportCsv(snapshot);
   const uri = `${FileSystem.cacheDirectory}hookstock-${formatDate(new Date())}.csv`;
@@ -21,7 +29,7 @@ export async function shareHistoryPdf(snapshot: InventorySnapshot) {
   const html = `
     <html>
       <body style="font-family: Arial; padding: 24px;">
-        <h1>HookStock - Relatorio de Saidas</h1>
+        <h1>GSM Case Stock - Relatorio de Saidas</h1>
         <table style="width: 100%; border-collapse: collapse;">
           <thead>
             <tr>
@@ -35,14 +43,19 @@ export async function shareHistoryPdf(snapshot: InventorySnapshot) {
           <tbody>
             ${snapshot.logs
               .map(
-                (log) => `
+                (log) => {
+                  const model = snapshot.models.find((m) => m.id === log.modelId);
+                  const brand = snapshot.brands.find((b) => b.id === model?.brandId);
+                  const modelLabel = escapeHtml(`${brand?.name ?? ''} ${model?.name ?? log.modelId}`.trim());
+                  return `
                   <tr>
                     <td style="border: 1px solid #ccc; padding: 8px;">${new Date(log.createdAt).toLocaleString('pt-BR')}</td>
-                    <td style="border: 1px solid #ccc; padding: 8px;">${log.modelId}</td>
-                    <td style="border: 1px solid #ccc; padding: 8px; text-transform: capitalize;">${log.variation}</td>
-                    <td style="border: 1px solid #ccc; padding: 8px; text-transform: capitalize;">${log.reason}</td>
+                    <td style="border: 1px solid #ccc; padding: 8px;">${modelLabel}</td>
+                    <td style="border: 1px solid #ccc; padding: 8px; text-transform: capitalize;">${escapeHtml(log.variation)}</td>
+                    <td style="border: 1px solid #ccc; padding: 8px; text-transform: capitalize;">${escapeHtml(log.reason)}</td>
                     <td style="border: 1px solid #ccc; padding: 8px;">${log.delta}</td>
-                  </tr>`,
+                  </tr>`;
+                },
               )
               .join('')}
           </tbody>

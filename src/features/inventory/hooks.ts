@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
+import { useAuth } from '../auth/AuthContext';
 import {
   adjustInventory,
   buildDashboardSummary,
@@ -20,30 +21,42 @@ export const inventoryKeys = {
 };
 
 export function useInventorySnapshot() {
+  const { session, isConfigured, isLoading } = useAuth();
+
   return useQuery({
-    queryKey: inventoryKeys.snapshot(),
+    queryKey: [...inventoryKeys.snapshot(), isConfigured ? session?.user.id ?? 'guest' : 'demo'],
     queryFn: getSnapshot,
+    enabled: !isLoading,
   });
 }
 
 export function useHookGrid(search: string) {
+  const { session, isConfigured, isLoading } = useAuth();
+
   return useQuery({
-    queryKey: inventoryKeys.grid(search),
+    queryKey: [...inventoryKeys.grid(search), isConfigured ? session?.user.id ?? 'guest' : 'demo'],
     queryFn: async () => buildGrid(await getSnapshot(), search),
+    enabled: !isLoading,
   });
 }
 
 export function useDashboardSummary() {
+  const { session, isConfigured, isLoading } = useAuth();
+
   return useQuery({
-    queryKey: inventoryKeys.dashboard(),
+    queryKey: [...inventoryKeys.dashboard(), isConfigured ? session?.user.id ?? 'guest' : 'demo'],
     queryFn: async () => buildDashboardSummary(await getSnapshot()),
+    enabled: !isLoading,
   });
 }
 
 export function useStockLogs() {
+  const { session, isConfigured, isLoading } = useAuth();
+
   return useQuery({
-    queryKey: inventoryKeys.logs(),
+    queryKey: [...inventoryKeys.logs(), isConfigured ? session?.user.id ?? 'guest' : 'demo'],
     queryFn: async () => (await getSnapshot()).logs,
+    enabled: !isLoading,
   });
 }
 

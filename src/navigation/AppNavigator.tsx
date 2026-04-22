@@ -3,6 +3,8 @@ import { DefaultTheme, NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
+import { useAuth } from '../features/auth/AuthContext';
+import { AuthScreen } from '../screens/AuthScreen';
 import { DashboardScreen } from '../screens/DashboardScreen';
 import { HistoryScreen } from '../screens/HistoryScreen';
 import { HookMapScreen } from '../screens/HookMapScreen';
@@ -10,6 +12,7 @@ import { NewModelScreen } from '../screens/NewModelScreen';
 import { theme } from '../theme';
 
 export type RootStackParamList = {
+  Auth: undefined;
   HomeTabs: undefined;
   NewModel: { modelId?: string } | undefined;
 };
@@ -53,6 +56,12 @@ function HomeTabs() {
 }
 
 export function AppNavigator() {
+  const { isConfigured, isLoading, session } = useAuth();
+
+  if (isLoading) {
+    return null;
+  }
+
   return (
     <NavigationContainer
       theme={{
@@ -75,8 +84,14 @@ export function AppNavigator() {
           contentStyle: { backgroundColor: theme.colors.background },
         }}
       >
-        <Stack.Screen component={HomeTabs} name="HomeTabs" options={{ headerShown: false }} />
-        <Stack.Screen component={NewModelScreen} name="NewModel" options={{ title: 'Novo modelo' }} />
+        {isConfigured && !session ? (
+          <Stack.Screen component={AuthScreen} name="Auth" options={{ headerShown: false }} />
+        ) : (
+          <>
+            <Stack.Screen component={HomeTabs} name="HomeTabs" options={{ headerShown: false }} />
+            <Stack.Screen component={NewModelScreen} name="NewModel" options={{ title: 'Modelo' }} />
+          </>
+        )}
       </Stack.Navigator>
     </NavigationContainer>
   );

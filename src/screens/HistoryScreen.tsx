@@ -16,6 +16,7 @@ export function HistoryScreen() {
       </View>
 
       <FlashList
+        estimatedItemSize={80}
         contentContainerStyle={styles.content}
         data={logs ?? []}
         keyExtractor={(item) => item.id}
@@ -34,7 +35,7 @@ export function HistoryScreen() {
                   {brand} {model?.name}
                 </Text>
                 <Text style={styles.meta}>
-                  {item.variation} · {item.reason}
+                  {item.variation} | {item.reason}
                 </Text>
               </View>
               <Text style={styles.date}>{new Date(item.createdAt).toLocaleDateString('pt-BR')}</Text>

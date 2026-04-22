@@ -1,16 +1,18 @@
-import { useMemo, useState } from 'react';
-import { Alert, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Alert, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import * as Haptics from 'expo-haptics';
 
+import { useAuth } from '../features/auth/AuthContext';
 import { useAdjustInventory, useHookGrid } from '../features/inventory/hooks';
 import { HookCellView, LogReason, VariationType } from '../features/inventory/types';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { theme } from '../theme';
 
-const reasonOptions: LogReason[] = ['venda', 'defeito', 'brinde', 'reposicao', 'ajuste'];
+const exitReasonOptions: LogReason[] = ['venda', 'defeito', 'brinde'];
+const allReasonOptions: LogReason[] = ['venda', 'defeito', 'brinde', 'reposicao', 'ajuste'];
 const variationLabels: Record<VariationType, string> = {
   silicone: 'Silicone',
   colorida: 'Colorida',
@@ -21,16 +23,41 @@ type Navigation = NativeStackNavigationProp<RootStackParamList>;
 
 export function HookMapScreen() {
   const navigation = useNavigation<Navigation>();
+  const { isConfigured, profile } = useAuth();
   const [search, setSearch] = useState('');
   const [selectedCell, setSelectedCell] = useState<HookCellView | null>(null);
   const [selectedReason, setSelectedReason] = useState<LogReason>('venda');
   const { data: columns } = useHookGrid(search);
   const adjustMutation = useAdjustInventory();
+  const canManageCatalog = profile?.role === 'owner' || profile?.role === 'manager' || !isConfigured;
 
   const highlightedCount = useMemo(
     () => columns?.flat().filter((cell) => cell.highlight).length ?? 0,
     [columns],
   );
+
+  const refreshSelectedCell = useCallback(
+    (modelId: string) => {
+      if (!columns) return;
+      for (const col of columns) {
+        for (const cell of col) {
+          if (cell.modelId === modelId) {
+            setSelectedCell(cell);
+            return;
+          }
+        }
+      }
+    },
+    [columns],
+  );
+
+  // Keep selectedCell in sync when grid data refreshes
+  useEffect(() => {
+    if (selectedCell?.modelId && columns) {
+      refreshSelectedCell(selectedCell.modelId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [columns]);
 
   async function handleAdjust(variation: VariationType, delta: number) {
     if (!selectedCell?.modelId) {
@@ -55,19 +82,30 @@ export function HookMapScreen() {
     }
   }
 
+  function handleEditModel() {
+    if (!selectedCell?.modelId) {
+      return;
+    }
+
+    setSelectedCell(null);
+    navigation.navigate('NewModel', { modelId: selectedCell.modelId });
+  }
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <View style={{ flex: 1, gap: 6 }}>
           <Text style={styles.title}>Mapa de ganchos</Text>
           <Text style={styles.subtitle}>
-            45 colunas x 7 linhas com scroll horizontal e acao rapida por toque.
+            45 colunas x 7 linhas com scroll horizontal, ajuste rapido e edicao visivel no modal.
           </Text>
         </View>
 
-        <Pressable onPress={() => navigation.navigate('NewModel')} style={styles.addButton}>
-          <Text style={styles.addButtonText}>Novo</Text>
-        </Pressable>
+        {canManageCatalog ? (
+          <Pressable onPress={() => navigation.navigate('NewModel')} style={styles.addButton}>
+            <Text style={styles.addButtonText}>Novo</Text>
+          </Pressable>
+        ) : null}
       </View>
 
       <View style={styles.searchCard}>
@@ -83,19 +121,17 @@ export function HookMapScreen() {
         </Text>
       </View>
 
-      <FlashList
-        contentContainerStyle={styles.listContent}
-        data={columns ?? []}
-        horizontal
-        keyExtractor={(item, index) => `column-${index + 1}`}
-        renderItem={({ item, index }) => (
-          <View style={styles.column}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.listContent}>
+        {(columns ?? []).map((item, index) => (
+          <View key={`column-${index + 1}`} style={styles.column}>
             <Text style={styles.columnTitle}>Col {index + 1}</Text>
             <View style={styles.columnCells}>
               {item.map((cell) => (
                 <Pressable
                   key={cell.key}
-                  onLongPress={() => !cell.isEmpty && navigation.navigate('NewModel', { modelId: cell.modelId })}
+                  onLongPress={() =>
+                    !cell.isEmpty && canManageCatalog && navigation.navigate('NewModel', { modelId: cell.modelId })
+                  }
                   onPress={() => (cell.isEmpty ? undefined : setSelectedCell(cell))}
                   style={[
                     styles.cell,
@@ -120,14 +156,15 @@ export function HookMapScreen() {
               ))}
             </View>
           </View>
-        )}
-        showsHorizontalScrollIndicator={false}
-      />
+        ))}
+      </ScrollView>
 
       <QuickActionModal
         cell={selectedCell}
         onAdjust={handleAdjust}
         onClose={() => setSelectedCell(null)}
+        canManageCatalog={canManageCatalog}
+        onEditModel={handleEditModel}
         onSelectReason={setSelectedReason}
         reason={selectedReason}
         visible={Boolean(selectedCell)}
@@ -142,6 +179,8 @@ function QuickActionModal({
   reason,
   onSelectReason,
   onAdjust,
+  canManageCatalog,
+  onEditModel,
   onClose,
 }: {
   visible: boolean;
@@ -149,6 +188,8 @@ function QuickActionModal({
   reason: LogReason;
   onSelectReason: (reason: LogReason) => void;
   onAdjust: (variation: VariationType, delta: number) => Promise<void>;
+  canManageCatalog: boolean;
+  onEditModel: () => void;
   onClose: () => void;
 }) {
   return (
@@ -159,15 +200,30 @@ function QuickActionModal({
             <View style={{ flex: 1, gap: 4 }}>
               <Text style={styles.modalTitle}>{cell?.brandName}</Text>
               <Text style={styles.modalSubtitle}>{cell?.modelName}</Text>
+              <Text style={styles.modalPosition}>
+                Gancho C{cell?.column}/L{cell?.row}
+              </Text>
             </View>
             <Pressable onPress={onClose}>
               <Text style={styles.closeText}>Fechar</Text>
             </Pressable>
           </View>
 
-          <Text style={styles.reasonTitle}>Motivo da saida</Text>
+          {canManageCatalog ? (
+            <View style={styles.managementCard}>
+              <View style={{ flex: 1, gap: 4 }}>
+                <Text style={styles.managementTitle}>Cadastro do modelo</Text>
+                <Text style={styles.managementText}>Edite nome, marca, limite critico ou mova para outro gancho.</Text>
+              </View>
+              <Pressable onPress={onEditModel} style={styles.editButton}>
+                <Text style={styles.editButtonText}>Editar modelo</Text>
+              </Pressable>
+            </View>
+          ) : null}
+
+          <Text style={styles.sectionTitle}>Motivo da saida</Text>
           <View style={styles.reasonWrap}>
-            {reasonOptions.map((option) => (
+            {exitReasonOptions.map((option) => (
               <Pressable
                 key={option}
                 onPress={() => onSelectReason(option)}
@@ -178,6 +234,7 @@ function QuickActionModal({
             ))}
           </View>
 
+          <Text style={styles.sectionTitle}>Ajuste rapido de estoque</Text>
           <View style={styles.actionsList}>
             {cell &&
               (Object.keys(variationLabels) as VariationType[]).map((variation) => (
@@ -262,8 +319,28 @@ const styles = StyleSheet.create({
   modalHeader: { flexDirection: 'row', gap: 12, alignItems: 'center' },
   modalTitle: { color: theme.colors.textMuted, fontWeight: '600' },
   modalSubtitle: { color: theme.colors.text, fontSize: 22, fontWeight: '800' },
+  modalPosition: { color: theme.colors.textMuted, fontSize: 13, fontWeight: '600' },
   closeText: { color: theme.colors.primary, fontWeight: '700' },
-  reasonTitle: { color: theme.colors.textMuted, fontWeight: '600' },
+  managementCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 14,
+    borderRadius: 20,
+    borderCurve: 'continuous',
+    backgroundColor: theme.colors.surfaceSoft,
+  },
+  managementTitle: { color: theme.colors.text, fontWeight: '700' },
+  managementText: { color: theme.colors.textMuted, lineHeight: 18, maxWidth: '92%' },
+  editButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    backgroundColor: theme.colors.primary,
+    borderRadius: 14,
+    borderCurve: 'continuous',
+  },
+  editButtonText: { color: '#fff', fontWeight: '800' },
+  sectionTitle: { color: theme.colors.textMuted, fontWeight: '600' },
   reasonWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   reasonChip: {
     paddingHorizontal: 12,

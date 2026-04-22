@@ -4,6 +4,7 @@ export type LogReason = 'venda' | 'defeito' | 'brinde' | 'reposicao' | 'ajuste';
 export interface Brand {
   id: string;
   name: string;
+  updatedAt?: string;
 }
 
 export interface Model {
@@ -12,7 +13,8 @@ export interface Model {
   name: string;
   column: number;
   row: number;
-  criticalThreshold: number;
+  criticalThresholds: Partial<Record<VariationType, number | null>>;
+  createdBy?: string | null;
 }
 
 export interface InventoryItem {
@@ -29,6 +31,7 @@ export interface StockLog {
   delta: number;
   reason: LogReason;
   note?: string;
+  actorId?: string | null;
   createdAt: string;
 }
 
@@ -82,6 +85,6 @@ export interface CreateModelInput {
   modelName: string;
   column: number;
   row: number;
-  criticalThreshold: number;
+  criticalThresholds: Partial<Record<VariationType, number | null>>;
   initialInventory?: Partial<Record<VariationType, number>>;
 }

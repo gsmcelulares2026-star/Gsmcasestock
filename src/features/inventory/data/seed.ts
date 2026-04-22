@@ -10,14 +10,14 @@ const brands = [
 ];
 
 const modelSeed = [
-  { id: 'model-1', brandId: 'brand-apple', name: 'iPhone 15', column: 1, row: 1, criticalThreshold: 3 },
-  { id: 'model-2', brandId: 'brand-apple', name: 'iPhone 14 Pro', column: 2, row: 1, criticalThreshold: 2 },
-  { id: 'model-3', brandId: 'brand-samsung', name: 'S24 Ultra', column: 4, row: 2, criticalThreshold: 3 },
-  { id: 'model-4', brandId: 'brand-samsung', name: 'A55', column: 5, row: 4, criticalThreshold: 2 },
-  { id: 'model-5', brandId: 'brand-xiaomi', name: 'Redmi Note 13', column: 11, row: 2, criticalThreshold: 2 },
-  { id: 'model-6', brandId: 'brand-motorola', name: 'Moto G84', column: 14, row: 5, criticalThreshold: 2 },
-  { id: 'model-7', brandId: 'brand-xiaomi', name: 'Poco X6', column: 18, row: 1, criticalThreshold: 2 },
-  { id: 'model-8', brandId: 'brand-apple', name: 'iPhone 13', column: 21, row: 3, criticalThreshold: 2 },
+  { id: 'model-1', brandId: 'brand-apple', name: 'iPhone 15', column: 1, row: 1, criticalThresholds: { silicone: 3, colorida: 2, carteira: 1 } },
+  { id: 'model-2', brandId: 'brand-apple', name: 'iPhone 14 Pro', column: 2, row: 1, criticalThresholds: { silicone: 2, colorida: 1, carteira: null } },
+  { id: 'model-3', brandId: 'brand-samsung', name: 'S24 Ultra', column: 4, row: 2, criticalThresholds: { silicone: 3, colorida: 2, carteira: 1 } },
+  { id: 'model-4', brandId: 'brand-samsung', name: 'A55', column: 5, row: 4, criticalThresholds: { silicone: 1, colorida: 1, carteira: 1 } },
+  { id: 'model-5', brandId: 'brand-xiaomi', name: 'Redmi Note 13', column: 11, row: 2, criticalThresholds: { silicone: 2, colorida: null, carteira: 1 } },
+  { id: 'model-6', brandId: 'brand-motorola', name: 'Moto G84', column: 14, row: 5, criticalThresholds: { silicone: 1, colorida: 1, carteira: 1 } },
+  { id: 'model-7', brandId: 'brand-xiaomi', name: 'Poco X6', column: 18, row: 1, criticalThresholds: { silicone: 2, colorida: 1, carteira: null } },
+  { id: 'model-8', brandId: 'brand-apple', name: 'iPhone 13', column: 21, row: 3, criticalThresholds: { silicone: 2, colorida: 2, carteira: 1 } },
 ];
 
 const quantities = [

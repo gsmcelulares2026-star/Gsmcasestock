@@ -4,6 +4,7 @@ import { Platform } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as SystemUI from 'expo-system-ui';
 
+import { AuthProvider } from '../features/auth/AuthContext';
 import { theme } from '../theme';
 
 void SystemUI.setBackgroundColorAsync(theme.colors.background);
@@ -29,7 +30,9 @@ export function AppProviders({ children }: PropsWithChildren) {
         backgroundColor: Platform.OS === 'android' ? theme.colors.background : theme.colors.surface,
       }}
     >
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>{children}</AuthProvider>
+      </QueryClientProvider>
     </SafeAreaProvider>
   );
 }

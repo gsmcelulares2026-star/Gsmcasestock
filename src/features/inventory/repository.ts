@@ -19,8 +19,38 @@ const TOTAL_COLUMNS = 45;
 const TOTAL_ROWS = 7;
 const VARIATIONS: VariationType[] = ['silicone', 'colorida', 'carteira'];
 
+function normalizeThresholds(
+  thresholds?: Partial<Record<VariationType, number | null>>,
+): Partial<Record<VariationType, number | null>> {
+  return {
+    silicone: thresholds?.silicone ?? null,
+    colorida: thresholds?.colorida ?? null,
+    carteira: thresholds?.carteira ?? null,
+  };
+}
+
 function makeId(prefix: string) {
-  return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
+  return `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
+}
+
+function requireSupabase() {
+  if (!supabase) {
+    throw new Error('Supabase nao configurado.');
+  }
+
+  return supabase;
+}
+
+async function getSessionUserId() {
+  if (!supabase) {
+    return null;
+  }
+
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  return session?.user.id ?? null;
 }
 
 async function readLocalSnapshot() {
@@ -38,23 +68,60 @@ async function writeLocalSnapshot(snapshot: InventorySnapshot) {
   await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
 }
 
-async function readSupabaseSnapshot(): Promise<InventorySnapshot> {
+export async function shouldUseSupabase() {
+  if (!isSupabaseConfigured || !supabase) {
+    return false;
+  }
+
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  return Boolean(session);
+}
+
+async function mapSupabaseSnapshot(): Promise<InventorySnapshot> {
+  const client = requireSupabase();
   const [brandsResponse, modelsResponse, inventoryResponse, logsResponse] = await Promise.all([
-    supabase!.from('brands').select('*').order('name'),
-    supabase!.from('models').select('*').order('column_index').order('row_index'),
-    supabase!.from('inventory').select('*'),
-    supabase!.from('logs').select('*').order('created_at', { ascending: false }).limit(200),
+    client.from('brands').select('id, name, updated_at').order('name'),
+    client
+      .from('models')
+      .select(
+        'id, brand_id, name, column_index, row_index, critical_silicone_threshold, critical_colorida_threshold, critical_carteira_threshold, created_by',
+      )
+      .order('column_index')
+      .order('row_index'),
+    client.from('inventory').select('id, model_id, variation, quantity'),
+    client
+      .from('logs')
+      .select('id, model_id, variation, delta, reason, note, actor_id, created_at')
+      .order('created_at', { ascending: false })
+      .limit(200),
   ]);
 
+  const errors = [brandsResponse.error, modelsResponse.error, inventoryResponse.error, logsResponse.error].filter(Boolean);
+  if (errors.length > 0) {
+    throw errors[0]!;
+  }
+
   return {
-    brands: (brandsResponse.data ?? []).map((brand) => ({ id: brand.id, name: brand.name })),
+    brands: (brandsResponse.data ?? []).map((brand) => ({
+      id: brand.id,
+      name: brand.name,
+      updatedAt: brand.updated_at,
+    })),
     models: (modelsResponse.data ?? []).map((model) => ({
       id: model.id,
       brandId: model.brand_id,
       name: model.name,
       column: model.column_index,
       row: model.row_index,
-      criticalThreshold: model.critical_threshold,
+      criticalThresholds: normalizeThresholds({
+        silicone: model.critical_silicone_threshold,
+        colorida: model.critical_colorida_threshold,
+        carteira: model.critical_carteira_threshold,
+      }),
+      createdBy: model.created_by,
     })),
     inventory: (inventoryResponse.data ?? []).map((item) => ({
       id: item.id,
@@ -69,16 +136,18 @@ async function readSupabaseSnapshot(): Promise<InventorySnapshot> {
       delta: log.delta,
       reason: log.reason as LogReason,
       note: log.note ?? undefined,
+      actorId: log.actor_id ?? undefined,
       createdAt: log.created_at,
     })),
   };
 }
 
 export async function getSnapshot() {
-  if (isSupabaseConfigured) {
+  if (await shouldUseSupabase()) {
     try {
-      return await readSupabaseSnapshot();
-    } catch {
+      return await mapSupabaseSnapshot();
+    } catch (error) {
+      console.warn('[HookStock] Supabase query failed, falling back to local data:', error);
       return readLocalSnapshot();
     }
   }
@@ -125,7 +194,10 @@ export function buildGrid(snapshot: InventorySnapshot, search = ''): HookCellVie
       const highlight =
         normalizedSearch.length > 0 &&
         `${brandName} ${model.name}`.toLowerCase().includes(normalizedSearch);
-      const critical = Object.values(inventory).some((quantity) => quantity <= model.criticalThreshold);
+      const critical = VARIATIONS.some((variation) => {
+        const threshold = model.criticalThresholds[variation];
+        return threshold !== null && threshold !== undefined && inventory[variation] <= threshold;
+      });
 
       return {
         key: `${column}-${row}`,
@@ -160,7 +232,8 @@ export function buildDashboardSummary(snapshot: InventorySnapshot): DashboardSum
       if (quantity === 0) {
         zeroStockCount += 1;
       }
-      if (quantity <= model.criticalThreshold) {
+      const threshold = model.criticalThresholds[variation];
+      if (threshold !== null && threshold !== undefined && quantity <= threshold) {
         lowStockCount += 1;
         lowStockItems.push({
           id: `${model.id}-${variation}`,
@@ -173,8 +246,9 @@ export function buildDashboardSummary(snapshot: InventorySnapshot): DashboardSum
     });
   });
 
+  const oneDayAgo = new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString();
   const recentSalesCount = snapshot.logs
-    .filter((log) => log.reason === 'venda' && log.delta < 0)
+    .filter((log) => log.reason === 'venda' && log.delta < 0 && log.createdAt >= oneDayAgo)
     .reduce((sum, log) => sum + Math.abs(log.delta), 0);
 
   return {
@@ -204,7 +278,74 @@ function upsertInventoryEntry(inventory: InventoryItem[], modelId: string, varia
   });
 }
 
+async function getOrCreateBrandId(brandName: string) {
+  const client = requireSupabase();
+  const normalizedName = brandName.trim();
+  const { data: existing, error: existingError } = await client
+    .from('brands')
+    .select('id, name')
+    .ilike('name', normalizedName)
+    .maybeSingle();
+
+  if (existingError) {
+    throw existingError;
+  }
+
+  if (existing) {
+    return existing.id;
+  }
+
+  const { data, error } = await client.from('brands').insert({ name: normalizedName }).select('id').single();
+  if (error) {
+    throw error;
+  }
+
+  return data.id;
+}
+
 export async function createModel(input: CreateModelInput) {
+  if (await shouldUseSupabase()) {
+    try {
+      const client = requireSupabase();
+      const brandId = await getOrCreateBrandId(input.brandName);
+      const userId = await getSessionUserId();
+
+      const { data: model, error: modelError } = await client
+        .from('models')
+        .insert({
+          brand_id: brandId,
+          name: input.modelName.trim(),
+          column_index: input.column,
+          row_index: input.row,
+          critical_silicone_threshold: input.criticalThresholds.silicone ?? null,
+          critical_colorida_threshold: input.criticalThresholds.colorida ?? null,
+          critical_carteira_threshold: input.criticalThresholds.carteira ?? null,
+          created_by: userId,
+        })
+        .select('id')
+        .single();
+
+      if (modelError) {
+        throw modelError;
+      }
+
+      const inventoryRows = VARIATIONS.map((variation) => ({
+        model_id: model.id,
+        variation,
+        quantity: input.initialInventory?.[variation] ?? 0,
+      }));
+
+      const { error: inventoryError } = await client.from('inventory').insert(inventoryRows);
+      if (inventoryError) {
+        throw inventoryError;
+      }
+
+      return model;
+    } catch (error) {
+      console.warn('[HookStock] Supabase createModel failed, falling back to local:', error);
+    }
+  }
+
   const snapshot = await readLocalSnapshot();
   const occupied = snapshot.models.some((model) => model.column === input.column && model.row === input.row);
 
@@ -225,7 +366,7 @@ export async function createModel(input: CreateModelInput) {
     name: input.modelName.trim(),
     column: input.column,
     row: input.row,
-    criticalThreshold: input.criticalThreshold,
+    criticalThresholds: normalizeThresholds(input.criticalThresholds),
   };
 
   snapshot.models.push(model);
@@ -239,6 +380,33 @@ export async function createModel(input: CreateModelInput) {
 }
 
 export async function updateModel(modelId: string, input: CreateModelInput) {
+  if (await shouldUseSupabase()) {
+    try {
+      const client = requireSupabase();
+      const brandId = await getOrCreateBrandId(input.brandName);
+      const { error } = await client
+        .from('models')
+        .update({
+          brand_id: brandId,
+          name: input.modelName.trim(),
+          column_index: input.column,
+          row_index: input.row,
+          critical_silicone_threshold: input.criticalThresholds.silicone ?? null,
+          critical_colorida_threshold: input.criticalThresholds.colorida ?? null,
+          critical_carteira_threshold: input.criticalThresholds.carteira ?? null,
+        })
+        .eq('id', modelId);
+
+      if (error) {
+        throw error;
+      }
+
+      return { id: modelId };
+    } catch (error) {
+      console.warn('[HookStock] Supabase updateModel failed, falling back to local:', error);
+    }
+  }
+
   const snapshot = await readLocalSnapshot();
   const model = snapshot.models.find((item) => item.id === modelId);
 
@@ -265,26 +433,76 @@ export async function updateModel(modelId: string, input: CreateModelInput) {
   model.name = input.modelName.trim();
   model.column = input.column;
   model.row = input.row;
-  model.criticalThreshold = input.criticalThreshold;
+  model.criticalThresholds = normalizeThresholds(input.criticalThresholds);
 
   await writeLocalSnapshot(snapshot);
   return model;
 }
 
 export async function deleteModel(modelId: string) {
-  const snapshot = await readLocalSnapshot();
+  if (await shouldUseSupabase()) {
+    try {
+      const client = requireSupabase();
+      const { error } = await client.from('models').delete().eq('id', modelId);
+      if (error) {
+        throw error;
+      }
 
+      return;
+    } catch (error) {
+      console.warn('[HookStock] Supabase deleteModel failed, falling back to local:', error);
+    }
+  }
+
+  const snapshot = await readLocalSnapshot();
   snapshot.models = snapshot.models.filter((item) => item.id !== modelId);
   snapshot.inventory = snapshot.inventory.filter((item) => item.modelId !== modelId);
   snapshot.logs = snapshot.logs.filter((item) => item.modelId !== modelId);
-
   await writeLocalSnapshot(snapshot);
 }
 
 export async function adjustInventory(input: AdjustmentInput) {
+  if (await shouldUseSupabase()) {
+    try {
+      const client = requireSupabase();
+      const { error } = await client.rpc('apply_inventory_log', {
+        p_model_id: input.modelId,
+        p_variation: input.variation,
+        p_delta: input.delta,
+        p_reason: input.reason,
+        p_note: input.note ?? null,
+      });
+
+      if (error) {
+        if (error.message.includes('INSUFFICIENT_STOCK')) {
+          throw new Error('Estoque insuficiente para essa saida.');
+        }
+
+        if (error.message.includes('INSUFFICIENT_PERMISSIONS')) {
+          throw new Error('Seu perfil nao tem permissao para movimentar estoque.');
+        }
+
+        throw error;
+      }
+
+      return;
+    } catch (error) {
+      if (error instanceof Error && (error.message.includes('Estoque insuficiente') || error.message.includes('permissao'))) {
+        throw error;
+      }
+      console.warn('[HookStock] Supabase RPC failed, falling back to local adjustment:', error);
+    }
+  }
+
   const snapshot = await readLocalSnapshot();
   const current = snapshot.inventory.find((item) => item.modelId === input.modelId && item.variation === input.variation);
-  const nextQuantity = Math.max(0, (current?.quantity ?? 0) + input.delta);
+  const currentQty = current?.quantity ?? 0;
+
+  if (input.delta < 0 && currentQty + input.delta < 0) {
+    throw new Error('Estoque insuficiente para essa saida.');
+  }
+
+  const nextQuantity = currentQty + input.delta;
 
   upsertInventoryEntry(snapshot.inventory, input.modelId, input.variation, nextQuantity);
 
@@ -301,6 +519,14 @@ export async function adjustInventory(input: AdjustmentInput) {
   await writeLocalSnapshot(snapshot);
 }
 
+function escapeCsvField(value: string | number) {
+  const str = String(value);
+  if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
+}
+
 export async function exportCsv(snapshot: InventorySnapshot) {
   const header = ['Marca', 'Modelo', 'Coluna', 'Linha', 'Variacao', 'Quantidade'];
   const rows = snapshot.models.flatMap((model) => {
@@ -308,7 +534,9 @@ export async function exportCsv(snapshot: InventorySnapshot) {
     const inventory = getModelInventory(snapshot, model.id);
 
     return VARIATIONS.map((variation) =>
-      [brand, model.name, model.column, model.row, variation, inventory[variation]].join(','),
+      [brand, model.name, model.column, model.row, variation, inventory[variation]]
+        .map(escapeCsvField)
+        .join(','),
     );
   });
 

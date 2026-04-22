@@ -3,13 +3,21 @@ import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
+import { useAuth } from '../features/auth/AuthContext';
 import { useCreateModel, useDeleteModel, useInventorySnapshot, useUpdateModel } from '../features/inventory/hooks';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { theme } from '../theme';
 
+const variationLabels = {
+  silicone: 'Silicone',
+  colorida: 'Colorida',
+  carteira: 'Carteira',
+} as const;
+
 export function NewModelScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, 'NewModel'>>();
+  const { isConfigured, profile } = useAuth();
   const modelId = route.params?.modelId;
   const createMutation = useCreateModel();
   const updateMutation = useUpdateModel();
@@ -18,12 +26,21 @@ export function NewModelScreen() {
 
   const existingModel = snapshot?.models.find((item) => item.id === modelId);
   const existingBrand = snapshot?.brands.find((item) => item.id === existingModel?.brandId)?.name ?? '';
+  const canManageCatalog = profile?.role === 'owner' || profile?.role === 'manager' || !isConfigured;
 
   const [brandName, setBrandName] = useState(existingBrand);
   const [modelName, setModelName] = useState(existingModel?.name ?? '');
   const [column, setColumn] = useState(existingModel?.column ?? 1);
   const [row, setRow] = useState(existingModel?.row ?? 1);
-  const [criticalThreshold, setCriticalThreshold] = useState(existingModel?.criticalThreshold ?? 2);
+  const [criticalThresholds, setCriticalThresholds] = useState({
+    silicone: existingModel?.criticalThresholds.silicone ?? null,
+    colorida: existingModel?.criticalThresholds.colorida ?? null,
+    carteira: existingModel?.criticalThresholds.carteira ?? null,
+  });
+
+  useEffect(() => {
+    navigation.setOptions({ title: modelId ? 'Editar modelo' : 'Novo modelo' });
+  }, [modelId, navigation]);
 
   useEffect(() => {
     if (!existingModel) {
@@ -34,10 +51,20 @@ export function NewModelScreen() {
     setModelName(existingModel.name);
     setColumn(existingModel.column);
     setRow(existingModel.row);
-    setCriticalThreshold(existingModel.criticalThreshold);
-  }, [existingBrand, existingModel]);
+    setCriticalThresholds({
+      silicone: existingModel.criticalThresholds.silicone ?? null,
+      colorida: existingModel.criticalThresholds.colorida ?? null,
+      carteira: existingModel.criticalThresholds.carteira ?? null,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [existingModel?.id]);
 
   async function handleSubmit() {
+    if (!canManageCatalog) {
+      Alert.alert('Sem permissao', 'Seu perfil nao pode cadastrar ou editar modelos.');
+      return;
+    }
+
     if (!brandName.trim() || !modelName.trim()) {
       Alert.alert('Campos obrigatorios', 'Informe a marca e o modelo.');
       return;
@@ -49,7 +76,7 @@ export function NewModelScreen() {
         modelName,
         column,
         row,
-        criticalThreshold,
+        criticalThresholds,
         initialInventory: { silicone: 0, colorida: 0, carteira: 0 },
       };
 
@@ -67,6 +94,11 @@ export function NewModelScreen() {
 
   async function handleDelete() {
     if (!modelId) {
+      return;
+    }
+
+    if (!canManageCatalog) {
+      Alert.alert('Sem permissao', 'Seu perfil nao pode excluir modelos.');
       return;
     }
 
@@ -113,11 +145,30 @@ export function NewModelScreen() {
         <Text style={styles.sectionTitle}>Posicionamento no painel</Text>
         <Stepper label="Coluna" max={45} min={1} onChange={setColumn} value={column} />
         <Stepper label="Linha" max={7} min={1} onChange={setRow} value={row} />
-        <Stepper label="Limite critico" max={10} min={0} onChange={setCriticalThreshold} value={criticalThreshold} />
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Limite critico por categoria</Text>
+        <Text style={styles.helperText}>Deixe como vazio para nao considerar alerta nessa variacao.</Text>
+        {(
+          Object.keys(variationLabels) as Array<keyof typeof variationLabels>
+        ).map((variation) => (
+          <ThresholdField
+            key={variation}
+            label={variationLabels[variation]}
+            value={criticalThresholds[variation]}
+            onChange={(value) =>
+              setCriticalThresholds((current) => ({
+                ...current,
+                [variation]: value,
+              }))
+            }
+          />
+        ))}
       </View>
 
       <Pressable
-        disabled={createMutation.isPending || updateMutation.isPending}
+        disabled={!canManageCatalog || createMutation.isPending || updateMutation.isPending}
         onPress={handleSubmit}
         style={styles.submitButton}
       >
@@ -131,7 +182,7 @@ export function NewModelScreen() {
       </Pressable>
 
       {modelId ? (
-        <Pressable disabled={deleteMutation.isPending} onPress={handleDelete} style={styles.deleteButton}>
+        <Pressable disabled={!canManageCatalog || deleteMutation.isPending} onPress={handleDelete} style={styles.deleteButton}>
           <Text style={styles.deleteText}>{deleteMutation.isPending ? 'Removendo...' : 'Excluir modelo'}</Text>
         </Pressable>
       ) : null}
@@ -177,6 +228,46 @@ function Stepper({
   );
 }
 
+function ThresholdField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number | null;
+  onChange: (value: number | null) => void;
+}) {
+  const displayValue = value === null ? '' : String(value);
+
+  return (
+    <View style={styles.thresholdRow}>
+      <Text style={styles.fieldLabel}>{label}</Text>
+      <View style={styles.thresholdControls}>
+        <Pressable onPress={() => onChange(null)} style={styles.clearButton}>
+          <Text style={styles.clearButtonText}>Sem alerta</Text>
+        </Pressable>
+        <TextInput
+          keyboardType="number-pad"
+          onChangeText={(text) => {
+            const normalized = text.trim();
+            if (!normalized) {
+              onChange(null);
+              return;
+            }
+
+            const parsed = Number(normalized);
+            onChange(Number.isNaN(parsed) ? null : Math.max(0, parsed));
+          }}
+          placeholder="Ex: 1"
+          placeholderTextColor={theme.colors.textMuted}
+          style={styles.thresholdInput}
+          value={displayValue}
+        />
+      </View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.colors.background },
   content: { padding: 16, gap: 16 },
@@ -199,11 +290,37 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
   },
+  helperText: { color: theme.colors.textMuted, lineHeight: 20 },
   stepperRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     gap: 12,
+  },
+  thresholdRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 12,
+  },
+  thresholdControls: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  clearButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: theme.colors.surfaceSoft,
+    borderRadius: 14,
+    borderCurve: 'continuous',
+  },
+  clearButtonText: { color: theme.colors.text, fontWeight: '700', fontSize: 12 },
+  thresholdInput: {
+    width: 78,
+    textAlign: 'center',
+    color: theme.colors.text,
+    backgroundColor: theme.colors.surfaceSoft,
+    borderRadius: 14,
+    borderCurve: 'continuous',
+    paddingHorizontal: 10,
+    paddingVertical: 10,
   },
   stepperControls: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   stepperButton: {
