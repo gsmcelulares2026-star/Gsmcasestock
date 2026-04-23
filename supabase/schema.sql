@@ -47,12 +47,20 @@ language plpgsql
 security definer
 set search_path = public
 as $$
+declare
+  assigned_role public.app_role;
 begin
+  if new.email = 'admin@gsm.com' then
+    assigned_role := 'owner';
+  else
+    assigned_role := 'operator';
+  end if;
+
   insert into public.profiles (id, full_name, role)
   values (
     new.id,
     coalesce(new.raw_user_meta_data ->> 'full_name', new.email),
-    'operator'
+    assigned_role
   )
   on conflict (id) do nothing;
 
