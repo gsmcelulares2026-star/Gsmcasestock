@@ -42,7 +42,7 @@ export function AuthScreen() {
     >
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.hero}>
-          <Text style={styles.eyebrow}>HookStock Cloud</Text>
+          <Text style={styles.eyebrow}>GSM Stock Case</Text>
           <Text style={styles.title}>Entre na operacao conectada do estoque</Text>
           <Text style={styles.subtitle}>
             Quando o Supabase estiver configurado, o app usa login real, permissao por perfil e movimentacao segura via banco.

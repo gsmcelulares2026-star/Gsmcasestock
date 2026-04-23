@@ -21,6 +21,7 @@ export interface InventoryItem {
   id: string;
   modelId: string;
   variation: VariationType;
+  color: string;
   quantity: number;
 }
 
@@ -28,6 +29,7 @@ export interface StockLog {
   id: string;
   modelId: string;
   variation: VariationType;
+  color: string;
   delta: number;
   reason: LogReason;
   note?: string;
@@ -54,6 +56,7 @@ export interface HookCellView {
   totalStock: number;
   critical: boolean;
   inventory: Record<VariationType, number>;
+  colorInventory?: Record<VariationType, Array<{ color: string; quantity: number }>>;
 }
 
 export interface DashboardSummary {
@@ -75,6 +78,7 @@ export interface DashboardSummary {
 export interface AdjustmentInput {
   modelId: string;
   variation: VariationType;
+  color: string;
   delta: number;
   reason: LogReason;
   note?: string;

@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "HookStock",
-    "slug": "hookstock",
+    "name": "GSM Stock Case",
+    "slug": "gsm-stock-case",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",

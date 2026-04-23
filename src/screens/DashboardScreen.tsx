@@ -1,10 +1,13 @@
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
+import { useQueryClient } from '@tanstack/react-query';
+
 import { useAuth } from '../features/auth/AuthContext';
 import { shareHistoryPdf, shareInventoryCsv } from '../features/inventory/export';
-import { useDashboardSummary, useInventorySnapshot } from '../features/inventory/hooks';
+import { pickAndImportExcel } from '../features/inventory/import';
+import { inventoryKeys, useDashboardSummary, useInventorySnapshot } from '../features/inventory/hooks';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { theme } from '../theme';
 
@@ -15,13 +18,32 @@ export function DashboardScreen() {
   const { isDemo, isConfigured, profile, signOut } = useAuth();
   const { data: summary } = useDashboardSummary();
   const { data: snapshot } = useInventorySnapshot();
+  const queryClient = useQueryClient();
   const canManageCatalog = profile?.role === 'owner' || profile?.role === 'manager' || !isConfigured;
+
+  async function handleImport() {
+    Alert.alert('Importar Planilha', 'Selecione a planilha (.xlsx ou .csv) contendo as capinhas.', [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Selecionar',
+        onPress: async () => {
+          const result = await pickAndImportExcel();
+          if (result.success) {
+            Alert.alert('Sucesso', result.message);
+            await queryClient.invalidateQueries({ queryKey: inventoryKeys.all });
+          } else {
+            Alert.alert('Aviso', result.message);
+          }
+        },
+      },
+    ]);
+  }
 
   return (
     <ScrollView contentContainerStyle={styles.content} style={styles.container}>
       <View style={styles.hero}>
         <View style={styles.heroTopRow}>
-          <Text style={styles.eyebrow}>HookStock</Text>
+          <Text style={styles.eyebrow}>GSM Stock Case</Text>
           <View style={[styles.modeBadge, isDemo ? styles.modeBadgeDemo : styles.modeBadgeCloud]}>
             <Text style={styles.modeBadgeText}>{isDemo ? 'Modo demo' : `Cloud | ${profile?.role ?? 'staff'}`}</Text>
           </View>
@@ -33,9 +55,14 @@ export function DashboardScreen() {
 
         <View style={styles.heroActions}>
           {canManageCatalog ? (
-            <Pressable onPress={() => navigation.navigate('NewModel')} style={styles.primaryButton}>
-              <Text style={styles.primaryButtonText}>Cadastrar modelo</Text>
-            </Pressable>
+            <>
+              <Pressable onPress={() => navigation.navigate('NewModel')} style={styles.primaryButton}>
+                <Text style={styles.primaryButtonText}>Cadastrar modelo</Text>
+              </Pressable>
+              <Pressable onPress={handleImport} style={styles.primaryButton}>
+                <Text style={styles.primaryButtonText}>Importar Excel</Text>
+              </Pressable>
+            </>
           ) : null}
 
           <Pressable

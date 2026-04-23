@@ -19,7 +19,7 @@ function escapeHtml(text: string) {
 
 export async function shareInventoryCsv(snapshot: InventorySnapshot) {
   const csv = await exportCsv(snapshot);
-  const uri = `${FileSystem.cacheDirectory}hookstock-${formatDate(new Date())}.csv`;
+  const uri = `${FileSystem.cacheDirectory}gsm-stock-case-${formatDate(new Date())}.csv`;
 
   await FileSystem.writeAsStringAsync(uri, csv, { encoding: FileSystem.EncodingType.UTF8 });
   await Sharing.shareAsync(uri);

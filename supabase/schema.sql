@@ -104,15 +104,17 @@ create table if not exists public.inventory (
   id uuid primary key default gen_random_uuid(),
   model_id uuid not null references public.models(id) on delete cascade,
   variation public.inventory_variation not null,
+  color text not null default '',
   quantity integer not null default 0 check (quantity >= 0),
   updated_at timestamptz not null default timezone('utc', now()),
-  unique (model_id, variation)
+  unique (model_id, variation, color)
 );
 
 create table if not exists public.logs (
   id uuid primary key default gen_random_uuid(),
   model_id uuid not null references public.models(id) on delete cascade,
   variation public.inventory_variation not null,
+  color text not null default '',
   delta integer not null check (delta <> 0),
   reason public.log_reason not null,
   note text,
@@ -365,6 +367,9 @@ alter table if exists public.inventory
   add column if not exists quantity integer;
 
 alter table if exists public.inventory
+  add column if not exists color text not null default '';
+
+alter table if exists public.inventory
   add column if not exists updated_at timestamptz not null default timezone('utc', now());
 
 update public.inventory
@@ -422,10 +427,11 @@ begin
   if not exists (
     select 1
     from pg_constraint
-    where conname = 'inventory_model_id_variation_key'
+    where conname = 'inventory_model_id_variation_color_key'
       and conrelid = 'public.inventory'::regclass
   ) then
-    alter table public.inventory add constraint inventory_model_id_variation_key unique (model_id, variation);
+    alter table public.inventory drop constraint if exists inventory_model_id_variation_key;
+    alter table public.inventory add constraint inventory_model_id_variation_color_key unique (model_id, variation, color);
   end if;
 end
 $$;
@@ -455,6 +461,9 @@ alter table if exists public.logs
 
 alter table if exists public.logs
   add column if not exists variation public.inventory_variation;
+
+alter table if exists public.logs
+  add column if not exists color text not null default '';
 
 alter table if exists public.logs
   add column if not exists delta integer;
@@ -628,7 +637,8 @@ create or replace function public.apply_inventory_log(
   p_variation public.inventory_variation,
   p_delta integer,
   p_reason public.log_reason,
-  p_note text default null
+  p_note text default null,
+  p_color text default ''
 )
 returns public.logs
 language plpgsql
@@ -658,15 +668,16 @@ begin
     raise exception 'INVALID_REASON_FOR_DELTA';
   end if;
 
-  insert into public.inventory (model_id, variation, quantity)
-  values (p_model_id, p_variation, 0)
-  on conflict (model_id, variation) do nothing;
+  insert into public.inventory (model_id, variation, color, quantity)
+  values (p_model_id, p_variation, p_color, 0)
+  on conflict (model_id, variation, color) do nothing;
 
   select quantity
   into current_quantity
   from public.inventory
   where model_id = p_model_id
     and variation = p_variation
+    and color = p_color
   for update;
 
   if current_quantity + p_delta < 0 then
@@ -676,10 +687,11 @@ begin
   update public.inventory
   set quantity = quantity + p_delta
   where model_id = p_model_id
-    and variation = p_variation;
+    and variation = p_variation
+    and color = p_color;
 
-  insert into public.logs (model_id, variation, delta, reason, note, actor_id)
-  values (p_model_id, p_variation, p_delta, p_reason, p_note, auth.uid())
+  insert into public.logs (model_id, variation, color, delta, reason, note, actor_id)
+  values (p_model_id, p_variation, p_color, p_delta, p_reason, p_note, auth.uid())
   returning *
   into updated_log;
 
@@ -691,7 +703,13 @@ do $$
 begin
   if exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'brands' and column_name = 'id' and udt_name = 'uuid') and exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'models' and column_name = 'brand_id' and udt_name = 'uuid') then
     execute $sql$
-      create or replace view public.v_inventory_dashboard as
+      drop view if exists public.v_inventory_dashboard cascade;
+      create view public.v_inventory_dashboard as
+      with grouped_inventory as (
+        select model_id, variation, sum(quantity)::integer as quantity
+        from public.inventory
+        group by model_id, variation
+      )
       select
         m.id as model_id,
         b.name as brand_name,
@@ -711,11 +729,12 @@ begin
         ) as is_critical
       from public.models m
       join public.brands b on b.id = m.brand_id
-      join public.inventory i on i.model_id = m.id;
+      join grouped_inventory i on i.model_id = m.id;
     $sql$;
   else
     execute $sql$
-      create or replace view public.v_inventory_dashboard as
+      drop view if exists public.v_inventory_dashboard cascade;
+      create view public.v_inventory_dashboard as
       select
         null::uuid as model_id,
         null::text as brand_name,

@@ -35,7 +35,7 @@ export function HistoryScreen() {
                   {brand} {model?.name}
                 </Text>
                 <Text style={styles.meta}>
-                  {item.variation} | {item.reason}
+                  {item.variation} - {item.color} | {item.reason}
                 </Text>
               </View>
               <Text style={styles.date}>{new Date(item.createdAt).toLocaleDateString('pt-BR')}</Text>

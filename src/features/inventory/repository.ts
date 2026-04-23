@@ -14,7 +14,7 @@ import {
   VariationType,
 } from './types';
 
-const STORAGE_KEY = 'hookstock.snapshot.v1';
+const STORAGE_KEY = 'gsm-stock-case.snapshot.v1';
 const TOTAL_COLUMNS = 45;
 const TOTAL_ROWS = 7;
 const VARIATIONS: VariationType[] = ['silicone', 'colorida', 'carteira'];
@@ -29,11 +29,11 @@ function normalizeThresholds(
   };
 }
 
-function makeId(prefix: string) {
+export function makeId(prefix: string) {
   return `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
 }
 
-function requireSupabase() {
+export function requireSupabase() {
   if (!supabase) {
     throw new Error('Supabase nao configurado.');
   }
@@ -41,7 +41,7 @@ function requireSupabase() {
   return supabase;
 }
 
-async function getSessionUserId() {
+export async function getSessionUserId() {
   if (!supabase) {
     return null;
   }
@@ -53,7 +53,7 @@ async function getSessionUserId() {
   return session?.user.id ?? null;
 }
 
-async function readLocalSnapshot() {
+export async function readLocalSnapshot() {
   const raw = await AsyncStorage.getItem(STORAGE_KEY);
 
   if (!raw) {
@@ -64,7 +64,7 @@ async function readLocalSnapshot() {
   return JSON.parse(raw) as InventorySnapshot;
 }
 
-async function writeLocalSnapshot(snapshot: InventorySnapshot) {
+export async function writeLocalSnapshot(snapshot: InventorySnapshot) {
   await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
 }
 
@@ -91,10 +91,10 @@ async function mapSupabaseSnapshot(): Promise<InventorySnapshot> {
       )
       .order('column_index')
       .order('row_index'),
-    client.from('inventory').select('id, model_id, variation, quantity'),
+    client.from('inventory').select('id, model_id, variation, color, quantity'),
     client
       .from('logs')
-      .select('id, model_id, variation, delta, reason, note, actor_id, created_at')
+      .select('id, model_id, variation, color, delta, reason, note, actor_id, created_at')
       .order('created_at', { ascending: false })
       .limit(200),
   ]);
@@ -127,12 +127,14 @@ async function mapSupabaseSnapshot(): Promise<InventorySnapshot> {
       id: item.id,
       modelId: item.model_id,
       variation: item.variation,
+      color: item.color,
       quantity: item.quantity,
     })),
     logs: (logsResponse.data ?? []).map((log) => ({
       id: log.id,
       modelId: log.model_id,
       variation: log.variation,
+      color: log.color,
       delta: log.delta,
       reason: log.reason as LogReason,
       note: log.note ?? undefined,
@@ -147,7 +149,7 @@ export async function getSnapshot() {
     try {
       return await mapSupabaseSnapshot();
     } catch (error) {
-      console.warn('[HookStock] Supabase query failed, falling back to local data:', error);
+      console.warn('[GSM Stock Case] Supabase query failed, falling back to local data:', error);
       return readLocalSnapshot();
     }
   }
@@ -158,11 +160,24 @@ export async function getSnapshot() {
 export function getModelInventory(snapshot: InventorySnapshot, modelId: string) {
   return VARIATIONS.reduce<Record<VariationType, number>>(
     (acc, variation) => {
-      acc[variation] =
-        snapshot.inventory.find((item) => item.modelId === modelId && item.variation === variation)?.quantity ?? 0;
+      acc[variation] = snapshot.inventory
+        .filter((item) => item.modelId === modelId && item.variation === variation)
+        .reduce((sum, item) => sum + item.quantity, 0);
       return acc;
     },
     { silicone: 0, colorida: 0, carteira: 0 },
+  );
+}
+
+export function getModelColorInventory(snapshot: InventorySnapshot, modelId: string) {
+  return VARIATIONS.reduce<Record<VariationType, Array<{ color: string; quantity: number }>>>(
+    (acc, variation) => {
+      acc[variation] = snapshot.inventory
+        .filter((item) => item.modelId === modelId && item.variation === variation && item.quantity > 0)
+        .map((item) => ({ color: item.color, quantity: item.quantity }));
+      return acc;
+    },
+    { silicone: [], colorida: [], carteira: [] },
   );
 }
 
@@ -190,6 +205,7 @@ export function buildGrid(snapshot: InventorySnapshot, search = ''): HookCellVie
 
       const brandName = snapshot.brands.find((brand) => brand.id === model.brandId)?.name;
       const inventory = getModelInventory(snapshot, model.id);
+      const colorInventory = getModelColorInventory(snapshot, model.id);
       const totalStock = Object.values(inventory).reduce((sum, quantity) => sum + quantity, 0);
       const highlight =
         normalizedSearch.length > 0 &&
@@ -211,6 +227,7 @@ export function buildGrid(snapshot: InventorySnapshot, search = ''): HookCellVie
         totalStock,
         critical,
         inventory,
+        colorInventory,
       };
     }),
   );
@@ -262,8 +279,8 @@ export function buildDashboardSummary(snapshot: InventorySnapshot): DashboardSum
   };
 }
 
-function upsertInventoryEntry(inventory: InventoryItem[], modelId: string, variation: VariationType, quantity: number) {
-  const existing = inventory.find((item) => item.modelId === modelId && item.variation === variation);
+function upsertInventoryEntry(inventory: InventoryItem[], modelId: string, variation: VariationType, color: string, quantity: number) {
+  const existing = inventory.find((item) => item.modelId === modelId && item.variation === variation && item.color === color);
 
   if (existing) {
     existing.quantity = Math.max(0, quantity);
@@ -274,6 +291,7 @@ function upsertInventoryEntry(inventory: InventoryItem[], modelId: string, varia
     id: makeId('inv'),
     modelId,
     variation,
+    color,
     quantity: Math.max(0, quantity),
   });
 }
@@ -332,6 +350,7 @@ export async function createModel(input: CreateModelInput) {
       const inventoryRows = VARIATIONS.map((variation) => ({
         model_id: model.id,
         variation,
+        color: 'Padrão',
         quantity: input.initialInventory?.[variation] ?? 0,
       }));
 
@@ -342,7 +361,7 @@ export async function createModel(input: CreateModelInput) {
 
       return model;
     } catch (error) {
-      console.warn('[HookStock] Supabase createModel failed, falling back to local:', error);
+      console.warn('[GSM Stock Case] Supabase createModel failed, falling back to local:', error);
     }
   }
 
@@ -372,7 +391,7 @@ export async function createModel(input: CreateModelInput) {
   snapshot.models.push(model);
 
   VARIATIONS.forEach((variation) => {
-    upsertInventoryEntry(snapshot.inventory, model.id, variation, input.initialInventory?.[variation] ?? 0);
+    upsertInventoryEntry(snapshot.inventory, model.id, variation, 'Padrão', input.initialInventory?.[variation] ?? 0);
   });
 
   await writeLocalSnapshot(snapshot);
@@ -403,7 +422,7 @@ export async function updateModel(modelId: string, input: CreateModelInput) {
 
       return { id: modelId };
     } catch (error) {
-      console.warn('[HookStock] Supabase updateModel failed, falling back to local:', error);
+      console.warn('[GSM Stock Case] Supabase updateModel failed, falling back to local:', error);
     }
   }
 
@@ -450,7 +469,7 @@ export async function deleteModel(modelId: string) {
 
       return;
     } catch (error) {
-      console.warn('[HookStock] Supabase deleteModel failed, falling back to local:', error);
+      console.warn('[GSM Stock Case] Supabase deleteModel failed, falling back to local:', error);
     }
   }
 
@@ -471,6 +490,7 @@ export async function adjustInventory(input: AdjustmentInput) {
         p_delta: input.delta,
         p_reason: input.reason,
         p_note: input.note ?? null,
+        p_color: input.color,
       });
 
       if (error) {
@@ -490,12 +510,12 @@ export async function adjustInventory(input: AdjustmentInput) {
       if (error instanceof Error && (error.message.includes('Estoque insuficiente') || error.message.includes('permissao'))) {
         throw error;
       }
-      console.warn('[HookStock] Supabase RPC failed, falling back to local adjustment:', error);
+      console.warn('[GSM Stock Case] Supabase RPC failed, falling back to local adjustment:', error);
     }
   }
 
   const snapshot = await readLocalSnapshot();
-  const current = snapshot.inventory.find((item) => item.modelId === input.modelId && item.variation === input.variation);
+  const current = snapshot.inventory.find((item) => item.modelId === input.modelId && item.variation === input.variation && item.color === input.color);
   const currentQty = current?.quantity ?? 0;
 
   if (input.delta < 0 && currentQty + input.delta < 0) {
@@ -504,12 +524,13 @@ export async function adjustInventory(input: AdjustmentInput) {
 
   const nextQuantity = currentQty + input.delta;
 
-  upsertInventoryEntry(snapshot.inventory, input.modelId, input.variation, nextQuantity);
+  upsertInventoryEntry(snapshot.inventory, input.modelId, input.variation, input.color, nextQuantity);
 
   snapshot.logs.unshift({
     id: makeId('log'),
     modelId: input.modelId,
     variation: input.variation,
+    color: input.color,
     delta: input.delta,
     reason: input.reason,
     note: input.note,

@@ -59,7 +59,7 @@ export function HookMapScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [columns]);
 
-  async function handleAdjust(variation: VariationType, delta: number) {
+  async function handleAdjust(variation: VariationType, color: string, delta: number) {
     if (!selectedCell?.modelId) {
       return;
     }
@@ -68,6 +68,7 @@ export function HookMapScreen() {
       await adjustMutation.mutateAsync({
         modelId: selectedCell.modelId,
         variation,
+        color: color.trim() || 'Padrão',
         delta,
         reason: delta > 0 ? 'reposicao' : selectedReason,
       });
@@ -187,11 +188,15 @@ function QuickActionModal({
   cell: HookCellView | null;
   reason: LogReason;
   onSelectReason: (reason: LogReason) => void;
-  onAdjust: (variation: VariationType, delta: number) => Promise<void>;
+  onAdjust: (variation: VariationType, color: string, delta: number) => Promise<void>;
   canManageCatalog: boolean;
   onEditModel: () => void;
   onClose: () => void;
 }) {
+  const [selectedVariation, setSelectedVariation] = useState<VariationType>('colorida');
+  const [colorInput, setColorInput] = useState('');
+
+  const currentColorInventory = cell?.colorInventory?.[selectedVariation] ?? [];
   return (
     <Modal animationType="slide" onRequestClose={onClose} transparent visible={visible}>
       <View style={styles.modalBackdrop}>
@@ -234,25 +239,59 @@ function QuickActionModal({
             ))}
           </View>
 
-          <Text style={styles.sectionTitle}>Ajuste rapido de estoque</Text>
+          <Text style={styles.sectionTitle}>Cores em Estoque</Text>
+          <View style={styles.tabsWrap}>
+            {(Object.keys(variationLabels) as VariationType[]).map((variation) => (
+              <Pressable
+                key={variation}
+                onPress={() => setSelectedVariation(variation)}
+                style={[styles.tabChip, selectedVariation === variation && styles.tabChipActive]}
+              >
+                <Text style={styles.tabChipText}>{variationLabels[variation]}</Text>
+              </Pressable>
+            ))}
+          </View>
+
           <View style={styles.actionsList}>
-            {cell &&
-              (Object.keys(variationLabels) as VariationType[]).map((variation) => (
-                <View key={variation} style={styles.actionRow}>
+            {currentColorInventory.length === 0 ? (
+              <Text style={styles.emptyText}>Nenhuma cor registrada.</Text>
+            ) : (
+              currentColorInventory.map((item) => (
+                <View key={item.color} style={styles.actionRow}>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.actionLabel}>{variationLabels[variation]}</Text>
-                    <Text style={styles.actionQty}>Atual: {cell.inventory[variation]}</Text>
+                    <Text style={styles.actionLabel}>{item.color}</Text>
+                    <Text style={styles.actionQty}>Atual: {item.quantity}</Text>
                   </View>
                   <View style={styles.actionButtons}>
-                    <Pressable onPress={() => void onAdjust(variation, -1)} style={styles.minusButton}>
+                    <Pressable onPress={() => void onAdjust(selectedVariation, item.color, -1)} style={styles.minusButton}>
                       <Text style={styles.actionButtonText}>-</Text>
                     </Pressable>
-                    <Pressable onPress={() => void onAdjust(variation, 1)} style={styles.plusButton}>
+                    <Pressable onPress={() => void onAdjust(selectedVariation, item.color, 1)} style={styles.plusButton}>
                       <Text style={styles.actionButtonText}>+</Text>
                     </Pressable>
                   </View>
                 </View>
-              ))}
+              ))
+            )}
+          </View>
+
+          <Text style={styles.sectionTitle}>Nova Cor / Ajuste Rápido</Text>
+          <View style={styles.newColorWrap}>
+            <TextInput
+              style={styles.newColorInput}
+              placeholder="Nome da cor (ex: Preta)"
+              placeholderTextColor={theme.colors.textMuted}
+              value={colorInput}
+              onChangeText={setColorInput}
+            />
+            <View style={styles.actionButtons}>
+              <Pressable onPress={() => { void onAdjust(selectedVariation, colorInput, -1); setColorInput(''); }} style={styles.minusButton}>
+                <Text style={styles.actionButtonText}>-</Text>
+              </Pressable>
+              <Pressable onPress={() => { void onAdjust(selectedVariation, colorInput, 1); setColorInput(''); }} style={styles.plusButton}>
+                <Text style={styles.actionButtonText}>+</Text>
+              </Pressable>
+            </View>
           </View>
         </View>
       </View>
@@ -380,4 +419,29 @@ const styles = StyleSheet.create({
     backgroundColor: '#1e4a3c',
   },
   actionButtonText: { color: '#fff', fontSize: 20, fontWeight: '800' },
+  tabsWrap: { flexDirection: 'row', gap: 8 },
+  tabChip: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderRadius: 16,
+    backgroundColor: theme.colors.surfaceSoft,
+  },
+  tabChipActive: { backgroundColor: theme.colors.primary },
+  tabChipText: { color: theme.colors.text, fontWeight: '700' },
+  newColorWrap: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'center',
+  },
+  newColorInput: {
+    flex: 1,
+    backgroundColor: theme.colors.surfaceSoft,
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    height: 48,
+    color: theme.colors.text,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
 });
