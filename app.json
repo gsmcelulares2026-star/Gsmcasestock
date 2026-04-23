@@ -16,9 +16,10 @@
       "supportsTablet": true
     },
     "android": {
+      "package": "com.gsmstock.app",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#08111f"
+        "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false
